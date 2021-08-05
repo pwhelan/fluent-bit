@@ -569,10 +569,6 @@ struct flb_input_chunk *flb_input_chunk_create(struct flb_input_instance *in,
     msgpack_packer_init(&ic->mp_pck, ic, flb_input_chunk_write);
     mk_list_add(&ic->_head, &in->chunks);
 
-    if (set_down == FLB_TRUE) {
-        cio_chunk_down(chunk);
-    }
-
     if (flb_input_event_type_is_log(in)) {
         flb_hash_add(in->ht_log_chunks, tag, tag_len, ic, 0);
     }
