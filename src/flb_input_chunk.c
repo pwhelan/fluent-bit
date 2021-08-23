@@ -735,7 +735,7 @@ static struct flb_input_chunk *input_chunk_get(struct flb_input_instance *in,
         if (new_chunk || flb_routes_mask_is_empty(ic->routes_mask) == FLB_TRUE) {
             flb_input_chunk_destroy(ic, FLB_TRUE);
         }
-
+        flb_error("[input chunk] unable to place new chunk");
         return NULL;
     }
 
