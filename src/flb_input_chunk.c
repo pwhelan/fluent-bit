@@ -529,6 +529,7 @@ struct flb_input_chunk *flb_input_chunk_create(struct flb_input_instance *in,
     if (ret == CIO_FALSE) {
         ret = cio_chunk_up_force(chunk);
         if (ret == -1) {
+            flb_error("[input chunk] could not force chunk up");
             cio_chunk_close(chunk, CIO_TRUE);
             return NULL;
         }
