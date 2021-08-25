@@ -142,14 +142,27 @@ static int configure(struct flb_dummy *ctx,
     }
 
     /* the message */
-    str = flb_input_get_property("dummy", in);
-    if (str != NULL) {
-        ctx->dummy_message = flb_strdup(str);
+    str = flb_input_get_property("length", in);
+    if (str != NULL && (val = atoi(str)) > 1) {
+        ctx->dummy_length = val;
     }
-    else {
-        ctx->dummy_message = flb_strdup(DEFAULT_DUMMY_MESSAGE);
+    if (ctx->dummy_length == 0) {
+        str = flb_input_get_property("dummy", in);
+        if (str != NULL) {
+            ctx->dummy_message = flb_strdup(str);
+        }
+        else {
+            ctx->dummy_message = flb_strdup(DEFAULT_DUMMY_MESSAGE);
+        }
+        ctx->dummy_message_len = strlen(ctx->dummy_message);
+    } else {
+        char *data = flb_calloc(1, ctx->dummy_length+1);
+        memset(data, 'A', ctx->dummy_length);
+        ctx->dummy_message_len = ctx->dummy_length+16;
+        ctx->dummy_message = flb_calloc(1, ctx->dummy_length+32);
+        sprintf(ctx->dummy_message, "{\"message\":\"%s\"}", data);
+        free(data);
     }
-    ctx->dummy_message_len = strlen(ctx->dummy_message);
 
     /* interval settings */
     tm->tv_sec  = 1;
@@ -272,6 +285,11 @@ static struct flb_config_map config_map[] = {
     FLB_CONFIG_MAP_INT, "rate", "1",
     0, FLB_FALSE, 0,
     "set a number of events per second."
+   },
+   {
+    FLB_CONFIG_MAP_INT, "Length", "0",
+    0, FLB_FALSE, 0,
+    "generate a message of this length instead of using the dummy value."
    },
    {
     FLB_CONFIG_MAP_INT, "start_time_sec", "1",

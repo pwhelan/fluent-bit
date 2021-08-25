@@ -30,7 +30,8 @@ struct flb_dummy {
     int samples;
     int samples_count;
     char *dummy_message;
-    int    dummy_message_len;
+    int dummy_length;
+    int dummy_message_len;
 
     char *ref_msgpack;
     size_t ref_msgpack_size;
