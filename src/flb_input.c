@@ -572,6 +572,7 @@ int flb_input_instance_init(struct flb_input_instance *ins,
             flb_input_instance_destroy(ins);
             return -1;
         }
+        flb_input_chunk_check_protection(ins);
     }
 
     return 0;

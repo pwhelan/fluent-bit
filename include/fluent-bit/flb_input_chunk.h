@@ -90,5 +90,6 @@ int flb_input_chunk_down(struct flb_input_chunk *ic);
 int flb_input_chunk_is_up(struct flb_input_chunk *ic);
 void flb_input_chunk_update_output_instances(struct flb_input_chunk *ic,
                                              size_t chunk_size);
+int flb_input_chunk_check_protection(struct flb_input_instance *in);
 
 #endif

@@ -251,7 +251,6 @@ static int in_dummy_init(struct flb_input_instance *in,
         config_destroy(ctx);
         return -1;
     }
-    flb_input_chunk_check_protection(in);
     return 0;
 }
 
