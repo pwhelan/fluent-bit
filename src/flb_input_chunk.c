@@ -907,7 +907,7 @@ static inline int flb_input_chunk_protect(struct flb_input_instance *i, struct f
         i->mem_buf_status = FLB_INPUT_PAUSED;
         return FLB_TRUE;
     }
-    if (flb_input_chunk_is_storage_overlimit(i) == FLB_TRUE || input_chunk_storage_size_overlimit(i, ic)) {
+    if (flb_input_chunk_is_storage_overlimit(i) == FLB_TRUE) {
         flb_warn("[input] %s paused (storage buf overlimit %d/%d)",
                  i->name,
                  ((struct flb_storage_input *)i->storage)->cio->total_chunks,
