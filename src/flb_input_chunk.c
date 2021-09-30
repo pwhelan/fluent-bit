@@ -50,8 +50,6 @@ struct cio_file {
     char *st_content;
 };
 
-static inline int flb_input_chunk_protect(struct flb_input_instance *i, struct flb_input_chunk *ic);
-
 static void generate_chunk_name(struct flb_input_instance *in,
                                 char *out_buf, int buf_size)
 {
@@ -335,6 +333,31 @@ int flb_input_chunk_find_space_new_data(struct flb_input_chunk *ic,
 
     return 0;
 }
+
+/*
+ * Returns a non-zero result if any output instances have reached their limit.
+ */
+int flb_input_chunk_tag_has_overlimit_routes(struct flb_input_instance *in)
+{
+    int overlimit = 0;
+    struct mk_list *head;
+    struct flb_output_instance *o_ins;
+    uint64_t route_mask;
+
+    flb_routes_mask_set_by_tag((uint64_t *)&route_mask, in->tag, in->tag_len, in);
+    mk_list_foreach(head, &in->config->outputs) {
+        o_ins = mk_list_entry(head, struct flb_output_instance, _head);
+        if ((o_ins->total_limit_size == -1) ||
+            (flb_routes_mask_get_bit(&route_mask, o_ins->id) == 0)) {
+            continue;
+        }
+        if (o_ins->total_limit_size <= o_ins->fs_chunks_size) {
+            overlimit |= (1 << o_ins->id);
+        }
+    }
+    return overlimit;
+}
+
 
 /*
  * Returns a non-zero result if any output instances will reach the limit
@@ -766,8 +789,7 @@ static struct flb_input_chunk *input_chunk_get(struct flb_input_instance *in,
 static inline int flb_input_chunk_is_mem_overlimit(struct flb_input_instance *i)
 {
     if (i->mem_buf_limit <= 0) {
-        return FLB_FALSE;
-    }
+        return FLB_FALSE;  }
 
     if (i->mem_chunks_size >= i->mem_buf_limit) {
         return FLB_TRUE;
@@ -794,38 +816,20 @@ static inline int flb_input_chunk_is_storage_overlimit(struct flb_input_instance
 
 int flb_input_chunk_check_protection(struct flb_input_instance *in)
 {
-    // fake input chunk
-    struct cio_stream st = {
-        .type = CIO_STORE_FS,
-    };
-    struct cio_file cf = {
-        .data_size = 32 * 1024
-    };
-    struct cio_chunk chunk = {
-        .lock = FLB_FALSE,
-        .name = "none",
-        .backend = (void *)&cf,
-        .tx_active = FLB_FALSE,
-        .tx_crc = 0,
-        .tx_content_length = 32 * 1024,
-        .ctx = NULL,
-        .st = &st
-    };
-    struct flb_input_chunk fic = {
-        .event_type = FLB_INPUT_LOGS,
-        .busy = FLB_FALSE,
-        .fs_backlog = FLB_FALSE,
-        .sp_done = FLB_FALSE,
-        .chunk = &chunk,
-        .stream_off = 0,
-        .in = in,
-        .task = NULL,
-        .routes_mask = {0, 0, 0, 0}
-    };
-
-
-    flb_routes_mask_set_by_tag((uint64_t *)&fic.routes_mask[0], in->tag, in->tag_len, in);
-    return flb_input_chunk_protect(in, &fic);
+    if (flb_input_chunk_tag_has_overlimit_routes(in) != 0) {
+         flb_warn("[input] %s start paused (file size overlimit)",
+                 in->name,
+                 ((struct flb_storage_input *)in->storage)->cio->total_chunks,
+                 ((struct flb_storage_input *)in->storage)->cio->max_chunks_up);
+        if (!flb_input_buf_paused(in)) {
+            if (in->p->cb_pause) {
+                in->p->cb_pause(in->context, in->config);
+            }
+        }
+        in->storage_buf_status = FLB_INPUT_PAUSED;
+        return FLB_TRUE;
+    }
+    return FLB_FALSE;
 }
 
 /*
@@ -874,6 +878,7 @@ size_t flb_input_chunk_set_limits(struct flb_input_instance *in)
         }
     }
     if (flb_input_chunk_is_storage_overlimit(in) == FLB_FALSE &&
+        flb_input_chunk_tag_has_overlimit_routes(in) == 0 &&
         in->config->is_running == FLB_TRUE &&
         in->config->is_ingestion_active == FLB_TRUE &&
         in->storage_buf_status == FLB_INPUT_PAUSED) {
@@ -894,7 +899,7 @@ size_t flb_input_chunk_set_limits(struct flb_input_instance *in)
  * If the number of bytes in use by the chunks are over the imposed limit
  * by configuration, pause the instance.
  */
-static inline int flb_input_chunk_protect(struct flb_input_instance *i, struct flb_input_chunk *ic)
+static inline int flb_input_chunk_protect(struct flb_input_instance *i)
 {
     if (flb_input_chunk_is_mem_overlimit(i) == FLB_TRUE) {
         flb_warn("[input] %s paused (mem buf overlimit)",
@@ -909,6 +914,19 @@ static inline int flb_input_chunk_protect(struct flb_input_instance *i, struct f
     }
     if (flb_input_chunk_is_storage_overlimit(i) == FLB_TRUE) {
         flb_warn("[input] %s paused (storage buf overlimit %d/%d)",
+                 i->name,
+                 ((struct flb_storage_input *)i->storage)->cio->total_chunks,
+                 ((struct flb_storage_input *)i->storage)->cio->max_chunks_up);
+        if (!flb_input_buf_paused(i)) {
+            if (i->p->cb_pause) {
+                i->p->cb_pause(i->context, i->config);
+            }
+        }
+        i->storage_buf_status = FLB_INPUT_PAUSED;
+        return FLB_TRUE;
+    }
+    if (flb_input_chunk_tag_has_overlimit_routes(i)) {
+        flb_warn("[input] %s paused (storage file size overlimit)",
                  i->name,
                  ((struct flb_storage_input *)i->storage)->cio->total_chunks,
                  ((struct flb_storage_input *)i->storage)->cio->max_chunks_up);
@@ -1206,7 +1224,7 @@ int flb_input_chunk_append_raw(struct flb_input_instance *in,
         }
     }
 
-    flb_input_chunk_protect(in, ic);
+    flb_input_chunk_protect(in);
     return 0;
 }
 
