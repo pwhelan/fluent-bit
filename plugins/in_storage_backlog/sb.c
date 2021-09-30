@@ -232,6 +232,7 @@ static int cb_sb_init(struct flb_input_instance *in,
 
     /* Based on discovered chunks, create a local reference list */
     sb_prepare_environment(ctx);
+    cb_queue_chunks(in, config, (void *)ctx);
 
     return 0;
 }
