@@ -836,7 +836,7 @@ size_t flb_input_chunk_set_limits(struct flb_input_instance *in)
  * If the number of bytes in use by the chunks are over the imposed limit
  * by configuration, pause the instance.
  */
-static inline int flb_input_chunk_protect(struct flb_input_instance *i)
+static inline int flb_input_chunk_protect(struct flb_input_instance *i, struct flb_input_chunk *ic)
 {
     if (flb_input_chunk_is_mem_overlimit(i) == FLB_TRUE) {
         flb_warn("[input] %s paused (mem buf overlimit)",
@@ -849,7 +849,7 @@ static inline int flb_input_chunk_protect(struct flb_input_instance *i)
         i->mem_buf_status = FLB_INPUT_PAUSED;
         return FLB_TRUE;
     }
-    if (flb_input_chunk_is_storage_overlimit(i) == FLB_TRUE) {
+    if (flb_input_chunk_is_storage_overlimit(i) == FLB_TRUE || input_chunk_storage_size_overlimit(i, ic)) {
         flb_warn("[input] %s paused (storage buf overlimit %d/%d)",
                  i->name,
                  ((struct flb_storage_input *)i->storage)->cio->total_chunks,
@@ -1148,7 +1148,7 @@ int flb_input_chunk_append_raw(struct flb_input_instance *in,
         }
     }
 
-    flb_input_chunk_protect(in);
+    flb_input_chunk_protect(in, ic);
     return 0;
 }
 
