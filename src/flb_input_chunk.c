@@ -30,6 +30,28 @@
 #include <fluent-bit/flb_metrics.h>
 #include <fluent-bit/stream_processor/flb_sp.h>
 
+
+struct cio_file {
+    int fd;                   /* file descriptor      */
+    int flags;                /* open flags */
+    int synced;               /* sync after latest write ? */
+    size_t fs_size;           /* original size in the file system */
+    size_t data_size;         /* number of bytes used */
+    size_t alloc_size;        /* allocated size       */
+    size_t realloc_size;      /* chunk size to increase alloc */
+    char *path;               /* root path + stream   */
+    char *map;                /* map of data          */
+#ifdef _WIN32
+    void *h;
+    crc_t crc_be;
+    int map_synced;
+#endif
+    /* cached addr */
+    char *st_content;
+};
+
+static inline int flb_input_chunk_protect(struct flb_input_instance *i, struct flb_input_chunk *ic);
+
 static void generate_chunk_name(struct flb_input_instance *in,
                                 char *out_buf, int buf_size)
 {
@@ -768,6 +790,42 @@ static inline int flb_input_chunk_is_storage_overlimit(struct flb_input_instance
     }
 
     return FLB_FALSE;
+}
+
+int flb_input_chunk_check_protection(struct flb_input_instance *in)
+{
+    // fake input chunk
+    struct cio_stream st = {
+        .type = CIO_STORE_FS,
+    };
+    struct cio_file cf = {
+        .data_size = 32 * 1024
+    };
+    struct cio_chunk chunk = {
+        .lock = FLB_FALSE,
+        .name = "none",
+        .backend = (void *)&cf,
+        .tx_active = FLB_FALSE,
+        .tx_crc = 0,
+        .tx_content_length = 32 * 1024,
+        .ctx = NULL,
+        .st = &st
+    };
+    struct flb_input_chunk fic = {
+        .event_type = FLB_INPUT_LOGS,
+        .busy = FLB_FALSE,
+        .fs_backlog = FLB_FALSE,
+        .sp_done = FLB_FALSE,
+        .chunk = &chunk,
+        .stream_off = 0,
+        .in = in,
+        .task = NULL,
+        .routes_mask = {0, 0, 0, 0}
+    };
+
+
+    flb_routes_mask_set_by_tag((uint64_t *)&fic.routes_mask[0], in->tag, in->tag_len, in);
+    return flb_input_chunk_protect(in, &fic);
 }
 
 /*
