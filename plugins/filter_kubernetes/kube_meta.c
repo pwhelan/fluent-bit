@@ -1329,6 +1329,88 @@ static inline int extract_meta(struct flb_kube *ctx,
     return 0;
 }
 
+static int get_node_name_from_api(struct flb_kube *ctx, struct flb_kube_meta *meta,
+                                  char **api_buf, size_t *api_size)
+{
+    int i;
+    int ret;
+    int map_size = 0;
+    int target_found = FLB_FALSE;
+    int spec_found = FLB_FALSE;
+    int have_nodename = -1;
+    size_t off = 0;
+
+    msgpack_unpacked api_result;
+    msgpack_object item_result;
+    msgpack_object k;
+    msgpack_object v;
+    msgpack_object spec_val;
+    msgpack_object api_map;
+
+    ret = get_api_server_info(ctx, meta->namespace, meta->podname,
+                              api_buf, api_size);
+    if (ret == -1) {
+        goto error;
+    }
+    /*
+     * - api_buf: metadata associated to namespace and POD Name coming from
+     *            the API server.
+     */
+
+    /* Iterate API server msgpack and lookup specific fields */
+    msgpack_unpacked_init(&api_result);
+    ret = msgpack_unpack_next(&api_result, *api_buf, *api_size, &off);
+    if (ret != MSGPACK_UNPACK_SUCCESS) {
+        goto unpack_error;
+    }
+    // untested code path
+    if (ctx->use_kubelet) {
+        ret = search_item_in_items(meta, ctx, api_result.data, &item_result);
+        if (ret == -1) {
+            target_found = FLB_FALSE;
+            goto unpack_error;
+        }
+        api_map = target_found ? item_result : api_result.data;
+    } else  {
+        api_map = api_result.data;
+    }
+
+    for (i = 0; target_found && !spec_found && i < api_map.via.map.size; i++) {
+        k = api_map.via.map.ptr[i].key;
+        if (k.via.str.size == 4 && !strncmp(k.via.str.ptr, "spec", 4)) {
+           spec_val = api_map.via.map.ptr[i].val;
+           spec_found = FLB_TRUE;
+        }
+    }
+
+    /* Process spec map value for nodeName */
+    if (spec_found == FLB_TRUE) {
+        for (i = 0; i < spec_val.via.map.size; i++) {
+            k = spec_val.via.map.ptr[i].key;
+            if (k.via.str.size == 8 &&
+                strncmp(k.via.str.ptr, "nodeName", 8) == 0) {
+                have_nodename = i;
+                map_size++;
+                break;
+            }
+        }
+    }
+
+    if (have_nodename >= 0) {
+        v = spec_val.via.map.ptr[have_nodename].val;
+        meta->nodename = flb_strdup(v.via.str.ptr);
+        meta->nodename_len = strlen(v.via.str.ptr);
+    }
+
+    msgpack_unpacked_destroy(&api_result);
+
+    return 0;
+unpack_error:
+    msgpack_unpacked_destroy(&api_result);
+error:
+    return -1;
+}
+
 /*
  * Given a fixed meta data (namespace and podname), get API server information
  * and merge buffers.
@@ -1440,6 +1522,9 @@ int flb_kube_meta_init(struct flb_kube *ctx, struct flb_config *config)
     int ret;
     char *meta_buf;
     size_t meta_size;
+    struct flb_kube_meta meta = {0};
+    struct flb_env *env;
+
 
     if (ctx->dummy_meta == FLB_TRUE) {
         flb_plg_warn(ctx->ins, "using Dummy Metadata");
@@ -1474,8 +1559,11 @@ int flb_kube_meta_init(struct flb_kube *ctx, struct flb_config *config)
         else {
             /* Gather info from API server */
             flb_plg_info(ctx->ins, "testing connectivity with API server...");
-            ret = get_api_server_info(ctx, ctx->namespace, ctx->podname,
-                                   &meta_buf, &meta_size);
+            ret = get_node_name_from_api(ctx, &meta, &meta_buf, &meta_size);
+            if (meta.nodename != NULL) {
+                env = ctx->config->env;
+                flb_env_set(env, "NODE_NAME", meta.nodename);
+            }
         }
         if (ret == -1) {
             if (!ctx->podname) {

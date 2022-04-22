@@ -28,6 +28,7 @@ struct flb_kube_meta {
     int fields;
 
     int namespace_len;
+    int nodename_len;
     int podname_len;
     int cache_key_len;
     int container_name_len;
@@ -36,6 +37,7 @@ struct flb_kube_meta {
     int container_image_len;
 
     char *namespace;
+    char *nodename;
     char *podname;
     char *container_name;
     char *container_image;
