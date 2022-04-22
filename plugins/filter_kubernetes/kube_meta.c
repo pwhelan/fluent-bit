@@ -495,6 +495,7 @@ static int get_api_server_info(struct flb_kube *ctx,
 
     /* validate pack */
     if (packed == -1) {
+        flb_plg_error(ctx->ins, "unable to get meta info from request");
         return -1;
     }
 
@@ -949,6 +950,7 @@ static int merge_meta(struct flb_kube_meta *meta, struct flb_kube *ctx,
      * - pod_id
      * - labels
      * - annotations
+     * - node_name
      */
 
     /* Initialize output msgpack buffer */
@@ -1347,9 +1349,12 @@ static int get_node_name_from_api(struct flb_kube *ctx, struct flb_kube_meta *me
     msgpack_object spec_val;
     msgpack_object api_map;
 
+    flb_plg_debug(ctx->ins, "getting spec.nodeName for pod %s/%s", meta->namespace,
+                  meta->podname);
     ret = get_api_server_info(ctx, meta->namespace, meta->podname,
                               api_buf, api_size);
     if (ret == -1) {
+        flb_plg_error(ctx->ins, "unable to get API server info");
         goto error;
     }
     /*
@@ -1361,12 +1366,14 @@ static int get_node_name_from_api(struct flb_kube *ctx, struct flb_kube_meta *me
     msgpack_unpacked_init(&api_result);
     ret = msgpack_unpack_next(&api_result, *api_buf, *api_size, &off);
     if (ret != MSGPACK_UNPACK_SUCCESS) {
+        flb_plg_error(ctx->ins, "unable to unpack API server info");
         goto unpack_error;
     }
     // untested code path
     if (ctx->use_kubelet) {
         ret = search_item_in_items(meta, ctx, api_result.data, &item_result);
         if (ret == -1) {
+            flb_plg_error(ctx->ins, "unable to find target from kubelet");
             target_found = FLB_FALSE;
             goto unpack_error;
         }
@@ -1403,7 +1410,6 @@ static int get_node_name_from_api(struct flb_kube *ctx, struct flb_kube_meta *me
     }
 
     msgpack_unpacked_destroy(&api_result);
-
     return 0;
 unpack_error:
     msgpack_unpacked_destroy(&api_result);
@@ -1542,7 +1548,10 @@ int flb_kube_meta_init(struct flb_kube *ctx, struct flb_config *config)
     /* Gather local info */
     ret = get_local_pod_info(ctx);
     if (ret == FLB_TRUE && !ctx->use_tag_for_meta) {
-        flb_plg_info(ctx->ins, "local POD info OK");
+        flb_plg_info(ctx->ins, "local POD info OK=%s/%s", ctx->namespace, ctx->podname);
+        
+        meta.podname = ctx->podname;
+        meta.namespace = ctx->namespace;
 
         ret = wait_for_dns(ctx);
         if (ret == -1) {
@@ -1560,7 +1569,7 @@ int flb_kube_meta_init(struct flb_kube *ctx, struct flb_config *config)
             /* Gather info from API server */
             flb_plg_info(ctx->ins, "testing connectivity with API server...");
             ret = get_node_name_from_api(ctx, &meta, &meta_buf, &meta_size);
-            if (meta.nodename != NULL) {
+            if (ret != -1 && meta.nodename != NULL) {
                 env = ctx->config->env;
                 flb_env_set(env, "NODE_NAME", meta.nodename);
             }
